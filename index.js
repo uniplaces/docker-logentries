@@ -29,7 +29,6 @@ function connect(opts) {
   return stream;
 }
 
-
 function start(opts) {
   var logsToken = opts.logstoken || opts.token;
   var statsToken = opts.statstoken || opts.token;
@@ -37,24 +36,31 @@ function start(opts) {
   var out;
   var noRestart = function() {};
 
+  var containersTokens = null;
+  if (opts.containersTokens) {
+    containersTokens = JSON.parse(opts.containersTokens);
+    console.log(containersTokens)
+  }
+
   var filter = through.obj(function(obj, enc, cb) {
     addAll(opts.add, obj);
     var token = '';
+    var line = '';
+    if (obj.line && obj.image && containersTokens) {
+      try {
+        line = JSON.parse(obj.line);
+        if (line['app-id'] && containersTokens[line['app-id']] !== undefined) {
+          token = containersTokens[line['app-id']];
+        }
+      } catch(e) {
+        // not logging
+      }
+    }
 
-    if (obj.line) {
-      token = logsToken;
-    }
-    else if (obj.type) {
-      token = eventsToken;
-    }
-    else if (obj.stats) {
-      token = statsToken;
-    }
-
-    if (token) {
+    if (token && line) {
       this.push(token);
       this.push(' ');
-      this.push(JSON.stringify(obj));
+      this.push(JSON.stringify(line));
       this.push('\n');
     }
 
@@ -69,7 +75,7 @@ function start(opts) {
 
   opts.events = events;
 
-  if (opts.logs !== false && logsToken) {
+  if (opts.logs !== false && (logsToken || containersTokens)) {
     loghose = logFactory(opts);
     loghose.pipe(filter);
     streamsOpened++;
@@ -161,9 +167,9 @@ function cli() {
     default: {
       json: false,
       newline: true,
-      stats: true,
+      stats: false,
       logs: true,
-      dockerEvents: true,
+      dockerEvents: false,
       statsinterval: 30,
       add: [ 'host=' + os.hostname() ],
       token: process.env.LOGENTRIES_TOKEN,
@@ -175,7 +181,7 @@ function cli() {
     }
   });
 
-  if (argv.help || !(argv.token || argv.logstoken || argv.statstoken || argv.eventstoken)) {
+  if (argv.help || !(argv.token || argv.logstoken || argv.statstoken || argv.eventstoken || argv.containersTokens)) {
     console.log('Usage: docker-logentries [-l LOGSTOKEN] [-k STATSTOKEN] [-e EVENTSTOKEN]\n' +
                 '                         [-t TOKEN] [--secure] [--json]\n' +
                 '                         [--no-newline] [--no-stats] [--no-logs] [--no-dockerEvents]\n' +
@@ -183,6 +189,7 @@ function cli() {
                 '                         [--matchByImage REGEXP] [--matchByName REGEXP]\n' +
                 '                         [--skipByImage REGEXP] [--skipByName REGEXP]\n' +
                 '                         [--server HOSTNAME] [--port PORT]\n' +
+                '                         [--containersTokens CONTAINERSTOKEN]\n' +
                 '                         [--help]');
 
     process.exit(1);
